@@ -70,6 +70,5 @@ app.get("/health", (_req, res) => {
 });
 
 app.listen(config.port, () => {
-  // eslint-disable-next-line no-console
   console.log(`SafeCommit backend listening on port ${config.port}`);
 });
