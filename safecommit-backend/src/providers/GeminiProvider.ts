@@ -1,0 +1,55 @@
+﻿import { GoogleGenerativeAI } from "@google/generative-ai";
+import type { LLMProvider } from "./LLMProvider";
+import { buildRepairPrompt, buildSystemPrompt, buildUserPrompt } from "../prompt";
+import { reviewResponseSchema } from "../schema";
+import { safeParseJson } from "../utils/parseJson";
+import { config } from "../config";
+
+export class GeminiProvider implements LLMProvider {
+  private model;
+
+  constructor() {
+    if (!config.geminiApiKey) {
+      throw new Error("GEMINI_API_KEY is required");
+    }
+    const genAI = new GoogleGenerativeAI(config.geminiApiKey);
+    this.model = genAI.getGenerativeModel({
+      model: "gemini-1.5-flash",
+      systemInstruction: buildSystemPrompt()
+    });
+  }
+
+  async reviewDiff(diff: string, files: string[]) {
+    const userPrompt = buildUserPrompt(diff, files);
+    const first = await this.model.generateContent(userPrompt);
+    const firstText = first.response.text();
+
+    const parsed = this.tryParse(firstText);
+    if (parsed.ok) {
+      return { findings: parsed.data.findings };
+    }
+
+    const repairPrompt = buildRepairPrompt(firstText);
+    const repair = await this.model.generateContent(repairPrompt);
+    const repairText = repair.response.text();
+    const repaired = this.tryParse(repairText);
+    if (!repaired.ok) {
+      throw new Error("Model returned invalid JSON after repair attempt");
+    }
+
+    return { findings: repaired.data.findings };
+  }
+
+  private tryParse(text: string): { ok: true; data: { findings: unknown } } | { ok: false; error: Error } {
+    try {
+      const json = safeParseJson(text);
+      const parsed = reviewResponseSchema.safeParse(json);
+      if (!parsed.success) {
+        return { ok: false, error: new Error("Schema validation failed") };
+      }
+      return { ok: true, data: parsed.data };
+    } catch (error) {
+      return { ok: false, error: error as Error };
+    }
+  }
+}

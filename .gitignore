@@ -1,0 +1,6 @@
+﻿node_modules/
+.DS_Store
+.env
+safecommit-backend/dist/
+safecommit-extension/out/
+.vscode/

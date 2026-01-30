@@ -1,0 +1,72 @@
+﻿{
+  "name": "safecommit-extension",
+  "displayName": "SafeCommit",
+  "description": "Review staged git changes with Gemini before commit",
+  "version": "0.1.0",
+  "publisher": "safecommit",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onCommand:safecommit.reviewStaged",
+    "onCommand:safecommit.openPanel",
+    "onCommand:safecommit.installHook",
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "safecommit.reviewStaged",
+        "title": "SafeCommit: Review Staged Changes"
+      },
+      {
+        "command": "safecommit.openPanel",
+        "title": "SafeCommit: Open Results Panel"
+      },
+      {
+        "command": "safecommit.installHook",
+        "title": "SafeCommit: Install Pre-Commit Hook"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "SafeCommit",
+      "properties": {
+        "safecommit.apiBaseUrl": {
+          "type": "string",
+          "default": "http://localhost:8787",
+          "description": "SafeCommit backend base URL"
+        },
+        "safecommit.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Optional API key for SafeCommit backend"
+        },
+        "safecommit.failOnSeverity": {
+          "type": "string",
+          "default": "critical",
+          "enum": ["nit", "suggestion", "warning", "critical"],
+          "description": "Fail commits when findings reach or exceed this severity"
+        },
+        "safecommit.maxDiffBytes": {
+          "type": "number",
+          "default": 200000,
+          "description": "Maximum diff size to send to backend in bytes"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.6.3",
+    "vsce": "^2.22.0"
+  }
+}

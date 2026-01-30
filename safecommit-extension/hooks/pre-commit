@@ -1,0 +1,52 @@
+﻿#!/usr/bin/env bash
+set -euo pipefail
+
+API_BASE_URL="${SAFECOMMIT_API_BASE_URL:-http://localhost:8787}"
+API_KEY="${SAFECOMMIT_API_KEY:-}"
+FAIL_ON_SEVERITY="${SAFECOMMIT_FAIL_ON_SEVERITY:-critical}"
+MAX_DIFF_BYTES="${SAFECOMMIT_MAX_DIFF_BYTES:-200000}"
+
+if [ -z "${GIT_DIR:-}" ]; then
+  repo_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+else
+  repo_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+fi
+
+if [ -z "$repo_root" ]; then
+  exit 0
+fi
+
+printf "SafeCommit: review staged changes before commit? (Y/n) "
+read -r reply < /dev/tty || true
+reply=${reply:-Y}
+if [ "$reply" != "Y" ] && [ "$reply" != "y" ]; then
+  exit 0
+fi
+
+diff=$(git diff --cached --unified=3 || true)
+if [ -z "$diff" ]; then
+  echo "SafeCommit: no staged changes to review."
+  exit 0
+fi
+
+files=$(git diff --cached --name-only || true)
+
+payload=$(SAFECOMMIT_FILES="$files" SAFECOMMIT_MAX_DIFF_BYTES="$MAX_DIFF_BYTES" node -e "const fs=require('fs'); const max=Number(process.env.SAFECOMMIT_MAX_DIFF_BYTES||'200000'); const input=fs.readFileSync(0,'utf8'); const diff=Buffer.from(input,'utf8').subarray(0,max).toString('utf8'); const files=(process.env.SAFECOMMIT_FILES||'').split(/\r?\n/).filter(Boolean); process.stdout.write(JSON.stringify({repoId: process.cwd(), diff, files}));" <<< "$diff")
+
+if [ -z "$payload" ]; then
+  echo "SafeCommit: failed to build request payload."
+  exit 0
+fi
+
+headers=("-H" "Content-Type: application/json")
+if [ -n "$API_KEY" ]; then
+  headers+=("-H" "Authorization: Bearer $API_KEY")
+fi
+
+response=$(curl -sS -X POST "$API_BASE_URL/v1/review/diff" "${headers[@]}" --data "$payload" || true)
+if [ -z "$response" ]; then
+  echo "SafeCommit: backend unavailable, skipping review."
+  exit 0
+fi
+
+node -e "const input=process.argv[1]; const fail=process.env.SAFECOMMIT_FAIL_ON_SEVERITY||'critical'; const order={nit:0,suggestion:1,warning:2,critical:3}; let data; try{data=JSON.parse(input);}catch(e){console.log('SafeCommit: invalid response from backend.');process.exit(0);} const findings=data.findings||[]; const summary=data.summary||{}; console.log('SafeCommit summary:', JSON.stringify(summary)); const top=findings.slice(0,5); for (const f of top){console.log('-', f.severity, f.file+':'+f.lineStart+'-'+f.lineEnd, f.title); } const shouldFail=findings.some(f=>order[f.severity]>=order[fail]); if(shouldFail){console.log('SafeCommit: blocking commit due to severity >=', fail); process.exit(1);} process.exit(0);" "$response"
