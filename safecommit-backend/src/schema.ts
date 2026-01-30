@@ -4,13 +4,16 @@ export const severityEnum = z.enum(["nit", "suggestion", "warning", "critical"])
 
 export const findingSchema = z.object({
   file: z.string().min(1),
-  lineStart: z.number().int().nonnegative(),
-  lineEnd: z.number().int().nonnegative(),
+  lineStart: z.number().int().min(1),
+  lineEnd: z.number().int().min(1),
   severity: severityEnum,
   title: z.string().min(1),
   message: z.string().min(1),
   rationale: z.string().min(1),
   patch: z.string().optional()
+}).refine((data) => data.lineEnd >= data.lineStart, {
+  message: "lineEnd must be greater than or equal to lineStart",
+  path: ["lineEnd"]
 });
 
 export const findingsSchema = z.array(findingSchema);

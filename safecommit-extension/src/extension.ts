@@ -187,27 +187,50 @@ function renderHtml(data: ReviewResponse): string {
   const grouped = groupFindings(data.findings);
   const summary = data.summary || { totalFindings: data.findings.length, bySeverity: {}, durationMs: 0 };
   const duration = summary.durationMs ? `${summary.durationMs} ms` : "";
+  const severityOrder: Finding["severity"][] = ["critical", "warning", "suggestion", "nit"];
+  const severityLabels: Record<Finding["severity"], string> = {
+    critical: "Critical",
+    warning: "Warning",
+    suggestion: "Suggestion",
+    nit: "Nit"
+  };
 
   const sections = Object.entries(grouped)
     .map(([file, items]) => {
-      const findingsHtml = items
-        .map((finding) => {
-          const patchButton = finding.patch
-            ? `<button data-copy="${escapeAttr(finding.patch)}">Copy patch</button>`
-            : "";
+      const bySeverity = groupBySeverity(items);
+      const severitySections = severityOrder
+        .map((severity) => {
+          const list = bySeverity[severity] || [];
+          if (list.length === 0) {
+            return "";
+          }
+          const findingsHtml = list
+            .map((finding) => {
+              const patchButton = finding.patch
+                ? `<button data-copy="${escapeAttr(finding.patch)}">Copy patch</button>`
+                : "";
+              return `
+                <div class="finding">
+                  <div class="finding-header">
+                    <span class="severity ${finding.severity}">${finding.severity.toUpperCase()}</span>
+                    <span class="title">${escapeHtml(finding.title)}</span>
+                    <span class="lines">${finding.lineStart}-${finding.lineEnd}</span>
+                  </div>
+                  <div class="message">${escapeHtml(finding.message)}</div>
+                  <div class="rationale">${escapeHtml(finding.rationale)}</div>
+                  <div class="actions">
+                    <button data-copy="${escapeAttr(finding.message)}">Copy message</button>
+                    ${patchButton}
+                  </div>
+                </div>
+              `;
+            })
+            .join("\n");
+
           return `
-            <div class="finding">
-              <div class="finding-header">
-                <span class="severity ${finding.severity}">${finding.severity.toUpperCase()}</span>
-                <span class="title">${escapeHtml(finding.title)}</span>
-                <span class="lines">${finding.lineStart}-${finding.lineEnd}</span>
-              </div>
-              <div class="message">${escapeHtml(finding.message)}</div>
-              <div class="rationale">${escapeHtml(finding.rationale)}</div>
-              <div class="actions">
-                <button data-copy="${escapeAttr(finding.message)}">Copy message</button>
-                ${patchButton}
-              </div>
+            <div class="severity-group">
+              <h3>${severityLabels[severity]}</h3>
+              ${findingsHtml}
             </div>
           `;
         })
@@ -216,7 +239,7 @@ function renderHtml(data: ReviewResponse): string {
       return `
         <section class="file-section">
           <h2>${escapeHtml(file)}</h2>
-          ${findingsHtml}
+          ${severitySections}
         </section>
       `;
     })
@@ -255,6 +278,13 @@ function renderHtml(data: ReviewResponse): string {
             font-size: 16px;
             margin: 16px 0 8px;
           }
+          h3 {
+            font-size: 14px;
+            margin: 12px 0 6px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+          }
           .summary {
             display: flex;
             gap: 12px;
@@ -277,6 +307,9 @@ function renderHtml(data: ReviewResponse): string {
             padding: 12px;
             border-radius: 8px;
             margin-top: 16px;
+          }
+          .severity-group {
+            padding-top: 4px;
           }
           .finding {
             border-top: 1px solid var(--border);
@@ -350,6 +383,14 @@ function groupFindings(findings: Finding[]): Record<string, Finding[]> {
   }, {});
 }
 
+function groupBySeverity(findings: Finding[]): Record<string, Finding[]> {
+  return findings.reduce<Record<string, Finding[]>>((acc, finding) => {
+    acc[finding.severity] = acc[finding.severity] || [];
+    acc[finding.severity].push(finding);
+    return acc;
+  }, {});
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -374,9 +415,11 @@ function applyDiagnostics(repoRoot: string, findings: Finding[]) {
     const filePath = path.isAbsolute(finding.file)
       ? finding.file
       : path.join(repoRoot, finding.file);
+    const startLine = Math.max(finding.lineStart - 1, 0);
+    const endLine = Math.max(finding.lineEnd - 1, startLine);
     const range = new vscode.Range(
-      new vscode.Position(Math.max(finding.lineStart - 1, 0), 0),
-      new vscode.Position(Math.max(finding.lineEnd - 1, 0), 0)
+      new vscode.Position(startLine, 0),
+      new vscode.Position(endLine, Number.MAX_SAFE_INTEGER)
     );
     const diagnostic = new vscode.Diagnostic(range, `${finding.title}: ${finding.message}`, mapSeverity(finding.severity));
     const list = diagnosticsByFile.get(filePath) || [];

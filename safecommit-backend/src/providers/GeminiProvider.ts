@@ -3,6 +3,7 @@ import type { LLMProvider } from "./LLMProvider";
 import { buildRepairPrompt, buildSystemPrompt, buildUserPrompt } from "../prompt";
 import { reviewResponseSchema } from "../schema";
 import { safeParseJson } from "../utils/parseJson";
+import { withTimeout } from "../utils/timeout";
 import { config } from "../config";
 
 export class GeminiProvider implements LLMProvider {
@@ -15,13 +16,20 @@ export class GeminiProvider implements LLMProvider {
     const genAI = new GoogleGenerativeAI(config.geminiApiKey);
     this.model = genAI.getGenerativeModel({
       model: "gemini-1.5-flash",
-      systemInstruction: buildSystemPrompt()
+      systemInstruction: buildSystemPrompt(),
+      generationConfig: {
+        responseMimeType: "application/json"
+      }
     });
   }
 
   async reviewDiff(diff: string, files: string[]) {
     const userPrompt = buildUserPrompt(diff, files);
-    const first = await this.model.generateContent(userPrompt);
+    const first = await withTimeout(
+      this.model.generateContent(userPrompt),
+      config.llmTimeoutMs,
+      "Gemini request timed out"
+    );
     const firstText = first.response.text();
 
     const parsed = this.tryParse(firstText);
@@ -30,7 +38,11 @@ export class GeminiProvider implements LLMProvider {
     }
 
     const repairPrompt = buildRepairPrompt(firstText);
-    const repair = await this.model.generateContent(repairPrompt);
+    const repair = await withTimeout(
+      this.model.generateContent(repairPrompt),
+      config.llmTimeoutMs,
+      "Gemini repair request timed out"
+    );
     const repairText = repair.response.text();
     const repaired = this.tryParse(repairText);
     if (!repaired.ok) {

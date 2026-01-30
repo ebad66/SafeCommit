@@ -13,6 +13,7 @@ SafeCommit is an MVP that reviews staged git changes with Gemini before commit. 
 
 - Node.js 18+
 - `GEMINI_API_KEY` in the environment
+  - Optional: `DEFAULT_MAX_DIFF_BYTES`, `LLM_TIMEOUT_MS`
 
 ### Setup
 
