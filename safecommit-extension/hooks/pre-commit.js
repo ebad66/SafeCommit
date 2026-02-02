@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 const { execSync } = require("child_process");
 const readline = require("readline");
 
@@ -6,6 +6,14 @@ const apiBaseUrl = process.env.SAFECOMMIT_API_BASE_URL || "http://localhost:8787
 const apiKey = process.env.SAFECOMMIT_API_KEY || "";
 const failOnSeverity = process.env.SAFECOMMIT_FAIL_ON_SEVERITY || "critical";
 const maxDiffBytes = Number.parseInt(process.env.SAFECOMMIT_MAX_DIFF_BYTES || "200000", 10);
+const TUFF = `
+███████╗ █████╗ ███████╗███████╗ ██████╗ ██████╗ ███╗   ███╗███╗   ███╗██╗████████╗    ██████╗ ███████╗██████╗  ██████╗ ██████╗ ████████╗
+██╔════╝██╔══██╗██╔════╝██╔════╝██╔════╝██╔═══██╗████╗ ████║████╗ ████║██║╚══██╔══╝    ██╔══██╗██╔════╝██╔══██╗██╔═══██╗██╔══██╗╚══██╔══╝
+███████╗███████║█████╗  █████╗  ██║     ██║   ██║██╔████╔██║██╔████╔██║██║   ██║       ██████╔╝█████╗  ██████╔╝██║   ██║██████╔╝   ██║   
+╚════██║██╔══██║██╔══╝  ██╔══╝  ██║     ██║   ██║██║╚██╔╝██║██║╚██╔╝██║██║   ██║       ██╔══██╗██╔══╝  ██╔═══╝ ██║   ██║██╔══██╗   ██║   
+███████║██║  ██║██║     ███████╗╚██████╗╚██████╔╝██║ ╚═╝ ██║██║ ╚═╝ ██║██║   ██║       ██║  ██║███████╗██║     ╚██████╔╝██║  ██║   ██║   
+╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝ ╚═════╝ ╚═════╝ ╚═╝     ╚═╝╚═╝     ╚═╝╚═╝   ╚═╝       ╚═╝  ╚═╝╚══════╝╚═╝      ╚═════╝ ╚═╝  ╚═╝   ╚═╝   
+`;
 
 function prompt(question) {
   return new Promise((resolve) => {
@@ -19,6 +27,15 @@ function prompt(question) {
 
 function runGit(args) {
   return execSync(`git ${args}`, { encoding: "utf8" });
+}
+
+function ensureUtf8Console() {
+  if (process.platform !== "win32") {
+    return;
+  }
+  try {
+    execSync("chcp 65001 >NUL");
+  } catch {}
 }
 
 function truncateByBytes(input, maxBytes) {
@@ -35,10 +52,19 @@ function severityAtOrAbove(sev, threshold) {
 }
 
 async function main() {
+  let repoRoot = "";
   try {
-    runGit("rev-parse --show-toplevel");
+    repoRoot = runGit("rev-parse --show-toplevel").trim();
   } catch {
     process.exit(0);
+  }
+
+  if (TUFF.trim()) {
+    ensureUtf8Console();
+    process.stdout.write(TUFF);
+    if (!TUFF.endsWith("\n")) {
+      process.stdout.write("\n");
+    }
   }
 
   const answer = await prompt("SafeCommit: review staged changes before commit? (Y/n) ");
@@ -86,12 +112,28 @@ async function main() {
 
   const data = await response.json();
   const findings = Array.isArray(data.findings) ? data.findings : [];
-  const summary = data.summary || {};
 
-  console.log("SafeCommit summary:", JSON.stringify(summary));
-  const top = findings.slice(0, 5);
-  for (const f of top) {
-    console.log(`- ${f.severity} ${f.file}:${f.lineStart}-${f.lineEnd} ${f.title}`);
+  console.log("Found Issues:");
+  if (findings.length === 0) {
+    console.log("1. None");
+  } else {
+    const seen = new Set();
+    let count = 0;
+    for (const f of findings) {
+      const severity = f.severity || "unspecified";
+      const file = f.file || "unknown";
+      const lineStart = f.lineStart ?? "?";
+      const lineEnd = f.lineEnd ?? "?";
+      const title = f.title || "Untitled issue";
+      const key = `${severity}|${file}|${lineStart}|${lineEnd}|${title}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      count += 1;
+      const location = lineStart === lineEnd ? `${file}:${lineStart}` : `${file}:${lineStart}-${lineEnd}`;
+      console.log(`${count}. [${severity}] ${location} - ${title}`);
+    }
   }
 
   const shouldFail = findings.some((f) => severityAtOrAbove(f.severity, failOnSeverity));

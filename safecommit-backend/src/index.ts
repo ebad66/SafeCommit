@@ -57,6 +57,15 @@ app.post("/v1/review/diff", async (req, res) => {
       summary
     });
   } catch (error) {
+    console.error(
+      "SafeCommit review failed",
+      JSON.stringify({
+        requestId,
+        diffBytes: Buffer.byteLength(diff, "utf8"),
+        filesCount: files.length
+      })
+    );
+    console.error(error);
     return res.status(502).json({
       requestId,
       error: "Failed to review diff",

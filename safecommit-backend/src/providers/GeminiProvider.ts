@@ -1,6 +1,10 @@
 ﻿import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { LLMProvider } from "./LLMProvider";
-import { buildRepairPrompt, buildSystemPrompt, buildUserPrompt } from "../prompt";
+import {
+  buildRepairPrompt,
+  buildSystemPrompt,
+  buildUserPrompt,
+} from "../prompt";
 import { reviewResponseSchema } from "../schema";
 import { safeParseJson } from "../utils/parseJson";
 import { withTimeout } from "../utils/timeout";
@@ -8,27 +12,33 @@ import { config } from "../config";
 
 export class GeminiProvider implements LLMProvider {
   private model;
+  private systemPrompt: string;
 
   constructor() {
     if (!config.geminiApiKey) {
       throw new Error("GEMINI_API_KEY is required");
     }
     const genAI = new GoogleGenerativeAI(config.geminiApiKey);
+    this.systemPrompt = buildSystemPrompt();
     this.model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      systemInstruction: buildSystemPrompt(),
+      model: "gemini-2.5-flash",
+      systemInstruction: this.systemPrompt,
       generationConfig: {
-        responseMimeType: "application/json"
-      }
+        responseMimeType: "application/json",
+      },
     });
   }
 
   async reviewDiff(diff: string, files: string[]) {
     const userPrompt = buildUserPrompt(diff, files);
+    if (config.debugPrompts) {
+      console.log("SafeCommit DEBUG system prompt:\n", this.systemPrompt);
+      console.log("SafeCommit DEBUG user prompt:\n", userPrompt);
+    }
     const first = await withTimeout(
       this.model.generateContent(userPrompt),
       config.llmTimeoutMs,
-      "Gemini request timed out"
+      "Gemini request timed out",
     );
     const firstText = first.response.text();
 
@@ -41,7 +51,7 @@ export class GeminiProvider implements LLMProvider {
     const repair = await withTimeout(
       this.model.generateContent(repairPrompt),
       config.llmTimeoutMs,
-      "Gemini repair request timed out"
+      "Gemini repair request timed out",
     );
     const repairText = repair.response.text();
     const repaired = this.tryParse(repairText);
@@ -52,7 +62,9 @@ export class GeminiProvider implements LLMProvider {
     return { findings: repaired.data.findings };
   }
 
-  private tryParse(text: string): { ok: true; data: { findings: unknown } } | { ok: false; error: Error } {
+  private tryParse(
+    text: string,
+  ): { ok: true; data: { findings: unknown } } | { ok: false; error: Error } {
     try {
       const json = safeParseJson(text);
       const parsed = reviewResponseSchema.safeParse(json);

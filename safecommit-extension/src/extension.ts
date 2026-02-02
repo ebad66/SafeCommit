@@ -29,9 +29,20 @@ type ReviewResponse = {
   summary: Summary;
 };
 
+type ReviewEntry = {
+  id: string;
+  label: string;
+  time: string;
+  repoRoot: string;
+  data: ReviewResponse;
+};
+
 let panel: vscode.WebviewPanel | undefined;
 let diagnosticCollection: vscode.DiagnosticCollection;
 let lastReview: ReviewResponse | undefined;
+const reviewHistory: ReviewEntry[] = [];
+let activeReviewId: string | undefined;
+let activeReviewEntry: ReviewEntry | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
   diagnosticCollection = vscode.languages.createDiagnosticCollection("safecommit");
@@ -46,6 +57,8 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("safecommit.installHook", () => installHook(context))
   );
+
+  void autoInstallHook(context);
 }
 
 export function deactivate() {
@@ -80,7 +93,14 @@ async function reviewStaged(context: vscode.ExtensionContext) {
   if (!diff.trim()) {
     vscode.window.showInformationMessage("SafeCommit: No staged changes to review.");
     clearDiagnostics();
-    renderResults(context, { requestId: "", findings: [], summary: { totalFindings: 0, bySeverity: {}, durationMs: 0 } });
+    openPanel(context);
+    if (panel) {
+      panel.webview.html = renderHtml({
+        entry: activeReviewEntry,
+        history: reviewHistory,
+        activeId: activeReviewId
+      });
+    }
     return;
   }
 
@@ -97,6 +117,11 @@ async function reviewStaged(context: vscode.ExtensionContext) {
     vscode.window.showWarningMessage("SafeCommit: Diff was truncated due to size limits.");
   }
 
+  openPanel(context);
+  if (panel) {
+    panel.webview.html = renderLoadingHtml();
+  }
+
   let response: ReviewResponse;
   try {
     response = await callBackend(settings.apiBaseUrl, settings.apiKey, {
@@ -110,7 +135,16 @@ async function reviewStaged(context: vscode.ExtensionContext) {
   }
 
   lastReview = response;
-  renderResults(context, response);
+  const entry: ReviewEntry = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    label: "Pending commit",
+    time: new Date().toLocaleString(),
+    repoRoot,
+    data: response
+  };
+  reviewHistory.unshift(entry);
+  activeReviewId = entry.id;
+  renderResults(context, entry);
   applyDiagnostics(repoRoot, response.findings);
 }
 
@@ -131,10 +165,55 @@ function openPanel(context: vscode.ExtensionContext) {
     panel = undefined;
   });
 
-  if (lastReview) {
-    renderResults(context, lastReview);
+  panel.webview.onDidReceiveMessage(async (message) => {
+    if (message?.type === "openFile" && activeReviewEntry) {
+      const file = message.file as string;
+      const line = Number(message.line) || 1;
+      const filePath = path.isAbsolute(file)
+        ? file
+        : path.join(activeReviewEntry.repoRoot, file);
+      try {
+        const doc = await vscode.workspace.openTextDocument(filePath);
+        const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+        const position = new vscode.Position(Math.max(line - 1, 0), 0);
+        const range = new vscode.Range(position, position);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+      } catch (error) {
+        vscode.window.showErrorMessage(`SafeCommit: Unable to open ${filePath}.`);
+      }
+      return;
+    }
+
+    if (message?.type === "selectReview") {
+      const id = message.id as string;
+      const entry = reviewHistory.find((item) => item.id === id);
+      if (entry) {
+        activeReviewId = entry.id;
+        renderResults(context, entry);
+      }
+    }
+  });
+
+  if (reviewHistory.length > 0) {
+    const entry = reviewHistory.find((item) => item.id === activeReviewId) ?? reviewHistory[0];
+    activeReviewId = entry.id;
+    renderResults(context, entry);
+  } else if (lastReview) {
+    const entry: ReviewEntry = {
+      id: "last",
+      label: "Last review",
+      time: new Date().toLocaleString(),
+      repoRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "",
+      data: lastReview
+    };
+    renderResults(context, entry);
   } else {
-    panel.webview.html = renderHtml({ requestId: "", findings: [], summary: { totalFindings: 0, bySeverity: {}, durationMs: 0 } });
+    panel.webview.html = renderHtml({
+      entry: undefined,
+      history: [],
+      activeId: undefined
+    });
   }
 }
 
@@ -151,6 +230,47 @@ async function installHook(context: vscode.ExtensionContext) {
     return;
   }
 
+  try {
+    const installed = await installHookFiles(context, repoRoot);
+    if (installed) {
+      vscode.window.showInformationMessage("SafeCommit: Pre-commit hooks installed.");
+    } else {
+      vscode.window.showInformationMessage("SafeCommit: Pre-commit hooks already present.");
+    }
+  } catch (error) {
+    vscode.window.showErrorMessage(`SafeCommit: Failed to install hook. ${(error as Error).message}`);
+  }
+}
+
+async function autoInstallHook(context: vscode.ExtensionContext) {
+  const settings = getSettings();
+  if (!settings.autoInstallHook) {
+    return;
+  }
+
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (!workspaceFolder) {
+    return;
+  }
+
+  const repoRoot = await findRepoRoot(workspaceFolder.uri.fsPath);
+  if (!repoRoot) {
+    return;
+  }
+
+  try {
+    const installed = await installHookFiles(context, repoRoot);
+    if (installed) {
+      return;
+    }
+  } catch (error) {
+    vscode.window.showWarningMessage(
+      `SafeCommit: Auto hook install failed. ${(error as Error).message}`
+    );
+  }
+}
+
+async function installHookFiles(context: vscode.ExtensionContext, repoRoot: string): Promise<boolean> {
   const hooksDir = path.join(repoRoot, ".git", "hooks");
   const bashSource = context.asAbsolutePath(path.join("hooks", "pre-commit"));
   const nodeSource = context.asAbsolutePath(path.join("hooks", "pre-commit.js"));
@@ -158,35 +278,70 @@ async function installHook(context: vscode.ExtensionContext) {
   const nodeTarget = path.join(hooksDir, "pre-commit.js");
 
   try {
+    const [bashSourceContent, nodeSourceContent] = await Promise.all([
+      readNormalizedFile(bashSource),
+      readNormalizedFile(nodeSource)
+    ]);
+
+    const bashExists = await fileExists(bashTarget);
+    const nodeExists = await fileExists(nodeTarget);
+    if (bashExists && nodeExists) {
+      const [bashTargetContent, nodeTargetContent] = await Promise.all([
+        readNormalizedFile(bashTarget),
+        readNormalizedFile(nodeTarget)
+      ]);
+      const matches =
+        bashTargetContent === bashSourceContent &&
+        nodeTargetContent === nodeSourceContent;
+      if (!matches) {
+        return false;
+      }
+
+      const [bashNeedsNormalization, nodeNeedsNormalization] = await Promise.all([
+        fileNeedsNormalization(bashTarget),
+        fileNeedsNormalization(nodeTarget)
+      ]);
+      if (!bashNeedsNormalization && !nodeNeedsNormalization) {
+        return false;
+      }
+    }
+
     await fs.promises.mkdir(hooksDir, { recursive: true });
-    await fs.promises.copyFile(bashSource, bashTarget);
-    await fs.promises.copyFile(nodeSource, nodeTarget);
+    await fs.promises.writeFile(bashTarget, bashSourceContent, "utf8");
+    await fs.promises.writeFile(nodeTarget, nodeSourceContent, "utf8");
 
     if (process.platform !== "win32") {
       await fs.promises.chmod(bashTarget, 0o755);
       await fs.promises.chmod(nodeTarget, 0o755);
     }
 
-    vscode.window.showInformationMessage("SafeCommit: Pre-commit hooks installed.");
+    return true;
   } catch (error) {
-    vscode.window.showErrorMessage(`SafeCommit: Failed to install hook. ${(error as Error).message}`);
+    throw error;
   }
 }
 
-function renderResults(context: vscode.ExtensionContext, data: ReviewResponse) {
+function renderResults(context: vscode.ExtensionContext, entry: ReviewEntry) {
   if (!panel) {
     openPanel(context);
   }
   if (!panel) {
     return;
   }
-  panel.webview.html = renderHtml(data);
+  activeReviewEntry = entry;
+  panel.webview.html = renderHtml({
+    entry,
+    history: reviewHistory,
+    activeId: activeReviewId
+  });
 }
 
-function renderHtml(data: ReviewResponse): string {
+function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; activeId?: string }): string {
+  const entry = options.entry;
+  const data = entry?.data ?? { requestId: "", findings: [], summary: { totalFindings: 0, bySeverity: {}, durationMs: 0 } };
   const grouped = groupFindings(data.findings);
   const summary = data.summary || { totalFindings: data.findings.length, bySeverity: {}, durationMs: 0 };
-  const duration = summary.durationMs ? `${summary.durationMs} ms` : "";
+  const duration = summary.durationMs ? `${(summary.durationMs / 1000).toFixed(1)}s` : "";
   const severityOrder: Finding["severity"][] = ["critical", "warning", "suggestion", "nit"];
   const severityLabels: Record<Finding["severity"], string> = {
     critical: "Critical",
@@ -209,6 +364,11 @@ function renderHtml(data: ReviewResponse): string {
               const patchButton = finding.patch
                 ? `<button data-copy="${escapeAttr(finding.patch)}">Copy patch</button>`
                 : "";
+              const openButton = `
+                <button data-open-file="${escapeAttr(finding.file)}" data-open-line="${finding.lineStart}">
+                  Jump to code
+                </button>
+              `;
               return `
                 <div class="finding">
                   <div class="finding-header">
@@ -219,6 +379,7 @@ function renderHtml(data: ReviewResponse): string {
                   <div class="message">${escapeHtml(finding.message)}</div>
                   <div class="rationale">${escapeHtml(finding.rationale)}</div>
                   <div class="actions">
+                    ${openButton}
                     <button data-copy="${escapeAttr(finding.message)}">Copy message</button>
                     ${patchButton}
                   </div>
@@ -246,6 +407,13 @@ function renderHtml(data: ReviewResponse): string {
     .join("\n");
 
   const emptyState = data.findings.length === 0 ? "<p>No findings.</p>" : "";
+  const historyOptions = options.history
+    .map((item) => {
+      const selected = item.id === options.activeId ? "selected" : "";
+      const label = `${item.label} — ${item.time}`;
+      return `<option value="${escapeAttr(item.id)}" ${selected}>${escapeHtml(label)}</option>`;
+    })
+    .join("\n");
 
   return `
     <!DOCTYPE html>
@@ -273,6 +441,19 @@ function renderHtml(data: ReviewResponse): string {
           h1 {
             margin: 0 0 12px;
             font-size: 20px;
+          }
+          .toolbar {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 12px;
+          }
+          .history {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 13px;
           }
           h2 {
             font-size: 16px;
@@ -347,7 +528,12 @@ function renderHtml(data: ReviewResponse): string {
         </style>
       </head>
       <body>
-        <h1>SafeCommit Review</h1>
+        <div class="toolbar">
+          <h1>SafeCommit Review</h1>
+          <select class="history" id="review-select">
+            ${historyOptions || '<option value="">No reviews yet</option>'}
+          </select>
+        </div>
         <div class="summary">
           <span class="badge">Total: ${summary.totalFindings}</span>
           <span class="badge">Critical: ${summary.bySeverity?.critical ?? 0}</span>
@@ -359,6 +545,17 @@ function renderHtml(data: ReviewResponse): string {
         ${emptyState}
         ${sections}
         <script>
+          const vscode = acquireVsCodeApi();
+          const select = document.getElementById("review-select");
+          if (select) {
+            select.addEventListener("change", (event) => {
+              const target = event.target;
+              const id = target && target.value ? target.value : "";
+              if (id) {
+                vscode.postMessage({ type: "selectReview", id });
+              }
+            });
+          }
           document.querySelectorAll("button[data-copy]").forEach((button) => {
             button.addEventListener("click", async () => {
               const text = button.getAttribute("data-copy") || "";
@@ -369,7 +566,60 @@ function renderHtml(data: ReviewResponse): string {
               }
             });
           });
+          document.querySelectorAll("button[data-open-file]").forEach((button) => {
+            button.addEventListener("click", () => {
+              const file = button.getAttribute("data-open-file") || "";
+              const line = button.getAttribute("data-open-line") || "1";
+              if (file) {
+                vscode.postMessage({ type: "openFile", file, line });
+              }
+            });
+          });
         </script>
+      </body>
+    </html>
+  `;
+}
+
+function renderLoadingHtml(): string {
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SafeCommit Review</title>
+        <style>
+          :root {
+            --bg: #f4f1ec;
+            --card: #ffffff;
+            --ink: #1f2a2e;
+            --muted: #6a6f73;
+            --border: #e2e0db;
+          }
+          body {
+            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+            background: var(--bg);
+            color: var(--ink);
+            margin: 0;
+            padding: 24px;
+          }
+          .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            padding: 16px;
+            border-radius: 8px;
+          }
+          .muted {
+            color: var(--muted);
+          }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <strong>SafeCommit Review</strong>
+          <div class="muted">Review in progress…</div>
+        </div>
       </body>
     </html>
   `;
@@ -475,8 +725,31 @@ function getSettings() {
     apiBaseUrl: config.get<string>("apiBaseUrl", "http://localhost:8787"),
     apiKey: config.get<string>("apiKey", ""),
     failOnSeverity: config.get<string>("failOnSeverity", "critical"),
-    maxDiffBytes: config.get<number>("maxDiffBytes", 200000)
+    maxDiffBytes: config.get<number>("maxDiffBytes", 200000),
+    autoInstallHook: config.get<boolean>("autoInstallHook", true)
   };
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.promises.access(filePath, fs.constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readNormalizedFile(filePath: string): Promise<string> {
+  const content = await fs.promises.readFile(filePath, "utf8");
+  return content.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+}
+
+async function fileNeedsNormalization(filePath: string): Promise<boolean> {
+  const buffer = await fs.promises.readFile(filePath);
+  if (buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
+    return true;
+  }
+  return buffer.includes(0x0d);
 }
 
 async function callBackend(apiBaseUrl: string, apiKey: string, body: { repoId: string; diff: string; files: string[] }): Promise<ReviewResponse> {

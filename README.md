@@ -46,7 +46,11 @@ Body:
 Response:
 
 ```json
-{ "requestId": "string", "findings": [], "summary": { "totalFindings": 0, "bySeverity": {}, "durationMs": 0 } }
+{
+  "requestId": "string",
+  "findings": [],
+  "summary": { "totalFindings": 0, "bySeverity": {}, "durationMs": 0 }
+}
 ```
 
 ## VS Code Extension
@@ -72,6 +76,7 @@ npm install
 - `safecommit.apiKey` (optional)
 - `safecommit.failOnSeverity` (default `critical`)
 - `safecommit.maxDiffBytes` (default `200000`)
+- `safecommit.autoInstallHook` (default `true`)
 
 ## Pre-commit Hooks
 

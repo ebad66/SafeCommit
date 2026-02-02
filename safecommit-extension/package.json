@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "safecommit-extension",
   "displayName": "SafeCommit",
   "description": "Review staged git changes with Gemini before commit",
@@ -54,6 +54,11 @@
           "type": "number",
           "default": 200000,
           "description": "Maximum diff size to send to backend in bytes"
+        },
+        "safecommit.autoInstallHook": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically install SafeCommit pre-commit hooks on activation"
         }
       }
     }

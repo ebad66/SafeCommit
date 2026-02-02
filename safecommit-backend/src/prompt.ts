@@ -9,6 +9,7 @@ export function buildSystemPrompt(): string {
     "Severities must be one of: nit, suggestion, warning, critical.",
     "Map each finding to an existing file path and line range in the file.",
     "Prefer actionable guidance and minimal patches.",
+    "Make the message and rationale detailed and specific, including impact and concrete fix guidance.",
     "Be conservative; avoid nitpicks unless clearly beneficial."
   ].join(" ");
 }

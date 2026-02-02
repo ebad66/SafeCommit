@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 API_BASE_URL="${SAFECOMMIT_API_BASE_URL:-http://localhost:8787}"
@@ -15,6 +15,15 @@ fi
 if [ -z "$repo_root" ]; then
   exit 0
 fi
+
+cat <<'EOF'
+███████╗ █████╗ ███████╗███████╗ ██████╗ ██████╗ ███╗   ███╗███╗   ███╗██╗████████╗    ██████╗ ███████╗██████╗  ██████╗ ██████╗ ████████╗
+██╔════╝██╔══██╗██╔════╝██╔════╝██╔════╝██╔═══██╗████╗ ████║████╗ ████║██║╚══██╔══╝    ██╔══██╗██╔════╝██╔══██╗██╔═══██╗██╔══██╗╚══██╔══╝
+███████╗███████║█████╗  █████╗  ██║     ██║   ██║██╔████╔██║██╔████╔██║██║   ██║       ██████╔╝█████╗  ██████╔╝██║   ██║██████╔╝   ██║   
+╚════██║██╔══██║██╔══╝  ██╔══╝  ██║     ██║   ██║██║╚██╔╝██║██║╚██╔╝██║██║   ██║       ██╔══██╗██╔══╝  ██╔═══╝ ██║   ██║██╔══██╗   ██║   
+███████║██║  ██║██║     ███████╗╚██████╗╚██████╔╝██║ ╚═╝ ██║██║ ╚═╝ ██║██║   ██║       ██║  ██║███████╗██║     ╚██████╔╝██║  ██║   ██║   
+╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝ ╚═════╝ ╚═════╝ ╚═╝     ╚═╝╚═╝     ╚═╝╚═╝   ╚═╝       ╚═╝  ╚═╝╚══════╝╚═╝      ╚═════╝ ╚═╝  ╚═╝   ╚═╝   
+EOF
 
 printf "SafeCommit: review staged changes before commit? (Y/n) "
 read -r reply < /dev/tty || true
@@ -49,4 +58,4 @@ if [ -z "$response" ]; then
   exit 0
 fi
 
-node -e "const input=process.argv[1]; const fail=process.env.SAFECOMMIT_FAIL_ON_SEVERITY||'critical'; const order={nit:0,suggestion:1,warning:2,critical:3}; let data; try{data=JSON.parse(input);}catch(e){console.log('SafeCommit: invalid response from backend.');process.exit(0);} const findings=data.findings||[]; const summary=data.summary||{}; console.log('SafeCommit summary:', JSON.stringify(summary)); const top=findings.slice(0,5); for (const f of top){console.log('-', f.severity, f.file+':'+f.lineStart+'-'+f.lineEnd, f.title); } const shouldFail=findings.some(f=>order[f.severity]>=order[fail]); if(shouldFail){console.log('SafeCommit: blocking commit due to severity >=', fail); process.exit(1);} process.exit(0);" "$response"
+node -e "const input=process.argv[1]; const fail=process.env.SAFECOMMIT_FAIL_ON_SEVERITY||'critical'; const order={nit:0,suggestion:1,warning:2,critical:3}; let data; try{data=JSON.parse(input);}catch(e){console.log('SafeCommit: invalid response from backend.');process.exit(0);} const findings=Array.isArray(data.findings)?data.findings:[]; console.log('Found Issues:'); if(findings.length===0){ console.log('1. None'); } else { const seen=new Set(); let count=0; for(const f of findings){ const severity=f.severity||'unspecified'; const file=f.file||'unknown'; const lineStart=(f.lineStart!=null?f.lineStart:'?'); const lineEnd=(f.lineEnd!=null?f.lineEnd:'?'); const title=f.title||'Untitled issue'; const key=severity+'|'+file+'|'+lineStart+'|'+lineEnd+'|'+title; if(seen.has(key)){ continue; } seen.add(key); count+=1; const location=(lineStart===lineEnd)?(file+':'+lineStart):(file+':'+lineStart+'-'+lineEnd); console.log(count+'. ['+severity+'] '+location+' - '+title); } } const shouldFail=findings.some(f=>order[f.severity]>=order[fail]); if(shouldFail){console.log('SafeCommit: blocking commit due to severity >=', fail); process.exit(1);} process.exit(0);" "$response"

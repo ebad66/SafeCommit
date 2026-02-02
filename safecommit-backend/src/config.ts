@@ -11,5 +11,6 @@ export const config = {
   port: parseIntEnv(process.env.PORT, 8787),
   geminiApiKey: process.env.GEMINI_API_KEY || "",
   defaultMaxDiffBytes: parseIntEnv(process.env.DEFAULT_MAX_DIFF_BYTES, 200000),
-  llmTimeoutMs: parseIntEnv(process.env.LLM_TIMEOUT_MS, 60000)
+  llmTimeoutMs: parseIntEnv(process.env.LLM_TIMEOUT_MS, 60000),
+  debugPrompts: process.env.DEBUG_PROMPTS === "1"
 };

@@ -1,6 +1,8 @@
 ﻿node_modules/
 .DS_Store
 .env
+.env.*
+safecommit-backend/.env
 safecommit-backend/dist/
 safecommit-extension/out/
 .vscode/
