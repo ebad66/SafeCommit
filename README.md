@@ -13,7 +13,7 @@ SafeCommit is an MVP that reviews staged git changes with Gemini before commit. 
 
 - Node.js 18+
 - `GEMINI_API_KEY` in the environment
-  - Optional: `DEFAULT_MAX_DIFF_BYTES`, `LLM_TIMEOUT_MS`
+  - Optional: `DEFAULT_MAX_DIFF_BYTES`, `LLM_TIMEOUT_MS`, `DEBUG_PROMPTS`
 
 ### Setup
 
@@ -32,6 +32,10 @@ npm run dev
 ```
 
 The backend listens on `http://localhost:8787` by default.
+
+### Debugging prompts (optional)
+
+Set `DEBUG_PROMPTS=1` in `.env` to log the exact system + user prompts sent to Gemini.
 
 ### Endpoint
 
@@ -70,6 +74,11 @@ npm install
 4. In the Dev Host, open a git repo, stage changes, then run:
    - Command Palette → `SafeCommit: Review Staged Changes`
 
+Notes:
+- The review panel opens immediately with a loading state and updates when the backend responds.
+- Each review is added to a history dropdown (newest on top), and the duration is shown in seconds.
+- Findings in the panel include a **Jump to code** button.
+
 ### Settings
 
 - `safecommit.apiBaseUrl` (default `http://localhost:8787`)
@@ -88,6 +97,8 @@ Two hooks are provided:
 ### Install via VS Code
 
 Run `SafeCommit: Install Pre-Commit Hook` from the Command Palette. This copies both hook files into `.git/hooks/`.
+
+Note: if you update hook scripts, re-run the install command (hooks are per-repo and don’t auto-overwrite).
 
 ### Manual install
 
