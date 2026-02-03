@@ -554,6 +554,16 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
   const grouped = groupFindings(data.findings);
   const summary = data.summary || { totalFindings: data.findings.length, bySeverity: {}, durationMs: 0 };
   const duration = summary.durationMs ? `${(summary.durationMs / 1000).toFixed(1)}s` : "";
+  const fileCount = Object.keys(grouped).length;
+  const criticalCount = summary.bySeverity?.critical ?? 0;
+  const warningCount = summary.bySeverity?.warning ?? 0;
+  const suggestionCount = summary.bySeverity?.suggestion ?? 0;
+  const nitCount = summary.bySeverity?.nit ?? 0;
+  const passedCount = data.findings.length === 0 ? 1 : 0;
+  const statusText =
+    criticalCount > 0
+      ? `Commit blocked by ${criticalCount} critical issue${criticalCount === 1 ? "" : "s"}`
+      : "Commit allowed";
   const severityOrder: Finding["severity"][] = ["critical", "warning", "suggestion", "nit"];
   const severityLabels: Record<Finding["severity"], string> = {
     critical: "Critical",
@@ -576,11 +586,19 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
           }
           const findingsHtml = list
             .map((finding) => {
+              const lineLabel =
+                finding.lineStart === finding.lineEnd
+                  ? `line ${finding.lineStart}`
+                  : `lines ${finding.lineStart}-${finding.lineEnd}`;
+              const patchCopy = finding.patch
+                ? `${finding.patch}\n\n${lineLabel}`
+                : "";
               const patchButton = finding.patch
-                ? `<button data-copy="${escapeAttr(finding.patch)}">Copy patch</button>`
+                ? `<button class="btn" data-copy="${escapeAttr(patchCopy)}"><span class="icon">++</span>Copy Fix</button>`
                 : "";
               const openButton = `
-                <button data-open-file="${escapeAttr(finding.file)}" data-open-line="${finding.lineStart}">
+                <button class="btn" data-open-file="${escapeAttr(finding.file)}" data-open-line="${finding.lineStart}">
+                  <span class="icon"><></span>
                   Jump to code
                 </button>
               `;
@@ -591,11 +609,14 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
                     <span class="title">${escapeHtml(finding.title)}</span>
                     <span class="lines">${finding.lineStart}-${finding.lineEnd}</span>
                   </div>
-                  <div class="message">${escapeHtml(finding.message)}</div>
-                  <div class="rationale">${escapeHtml(finding.rationale)}</div>
+                  <div class="message">${escapeHtml(normalizeCopyText(finding.message))}</div>
+                  <div class="rationale">${escapeHtml(normalizeCopyText(finding.rationale))}</div>
                   <div class="actions">
                     ${openButton}
-                    <button data-copy="${escapeAttr(finding.message)}">Copy message</button>
+                    <button class="btn" data-copy="${escapeAttr(normalizeCopyText(finding.message))}">
+                      <span class="icon">>></span>
+                      Copy Message
+                    </button>
                     ${patchButton}
                   </div>
                 </div>
@@ -617,7 +638,7 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
           <button class="file-header" type="button" data-toggle="${index}" aria-expanded="false">
             <span class="file-name">${escapeHtml(fileName)}</span>
             <span class="file-meta">${issueLabel}</span>
-            <span class="chevron" aria-hidden="true">▼</span>
+            <span class="chevron" aria-hidden="true">v</span>
           </button>
           <div class="file-content" data-content="${index}">
             ${severitySections}
@@ -627,7 +648,7 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
     })
     .join("\n");
 
-  const emptyState = data.findings.length === 0 ? "<p>No findings.</p>" : "";
+  const emptyState = data.findings.length === 0 ? "No findings." : "";
   const historyOptions = options.history
     .map((item) => {
       const selected = item.id === options.activeId ? "selected" : "";
@@ -645,70 +666,156 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
         <title>SafeCommit Review</title>
         <style>
           :root {
-            --bg: #f4f1ec;
+            --bg: #f6f4f2;
             --card: #ffffff;
-            --ink: #1f2a2e;
-            --muted: #6a6f73;
-            --accent: #0b6bcb;
-            --border: #e2e0db;
+            --surface: #fbfaf9;
+            --ink: #1d232a;
+            --muted: #6f757b;
+            --accent: #2f6fed;
+            --border: #e6e1dc;
+            --critical: #c63b4a;
+            --warning: #e0843c;
+            --pass: #2e9c5c;
+            --shadow: 0 18px 50px rgba(28, 25, 23, 0.12);
+          }
+          * {
+            box-sizing: border-box;
           }
           body {
-            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-            background: var(--bg);
+            font-family: "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+            background: radial-gradient(circle at top, #ffffff 0%, #f2ede9 45%, #f6f4f2 100%);
             color: var(--ink);
             margin: 0;
-            padding: 24px;
+            padding: 32px;
           }
-          h1 {
-            margin: 0 0 12px;
-            font-size: 20px;
+          .page {
+            max-width: 1080px;
+            margin: 0 auto;
+            background: var(--card);
+            border-radius: 24px;
+            box-shadow: var(--shadow);
+            overflow: hidden;
           }
-          .toolbar {
+          .hero {
             display: flex;
-            gap: 12px;
             align-items: center;
-            margin-bottom: 12px;
+            justify-content: space-between;
+            gap: 24px;
+            padding: 28px 32px;
+            background: linear-gradient(120deg, #ffffff 0%, #f7f2ee 100%);
+            border-bottom: 1px solid var(--border);
+          }
+          .hero h1 {
+            margin: 0 0 8px;
+            font-size: 24px;
+            letter-spacing: -0.01em;
+          }
+          .subtitle {
+            margin: 0;
+            color: var(--muted);
+            font-size: 14px;
           }
           .history {
-            background: var(--card);
+            background: #ffffff;
             border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 8px 10px;
+            border-radius: 12px;
+            padding: 10px 14px;
             font-size: 13px;
+            min-width: 260px;
+            font-family: inherit;
+            color: var(--ink);
           }
-          h2 {
-            font-size: 16px;
-            margin: 16px 0 8px;
+          .summary-row {
+            display: grid;
+            grid-template-columns: 1.3fr 1fr;
+            gap: 16px;
+            padding: 16px 32px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
           }
-          h3 {
-            font-size: 14px;
-            margin: 12px 0 6px;
-            color: var(--muted);
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-          }
-          .summary {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-            background: var(--card);
+          .summary-card {
+            background: #ffffff;
             border: 1px solid var(--border);
-            padding: 12px;
-            border-radius: 8px;
+            border-radius: 16px;
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            min-height: 54px;
           }
-          .badge {
-            background: #f0f2f4;
+          .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
             border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            background: #f5f2ef;
+            color: var(--ink);
+          }
+          .pill::before {
+            content: "";
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--muted);
+          }
+          .pill.critical::before {
+            background: var(--critical);
+          }
+          .pill.warning::before {
+            background: var(--warning);
+          }
+          .pill.pass::before {
+            background: var(--pass);
+          }
+          .summary-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 13px;
             color: var(--muted);
+          }
+          .summary-meta .divider {
+            width: 1px;
+            height: 16px;
+            background: var(--border);
+          }
+          .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--ink);
+            background: #f5f2ef;
+          }
+          .status.blocked {
+            background: #fdecec;
+            color: var(--critical);
+          }
+          .status.allowed {
+            background: #e8f6ee;
+            color: var(--pass);
+          }
+          .content {
+            padding: 22px 32px 32px;
+            background: #ffffff;
+          }
+          .files {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
           }
           .file-section {
-            background: var(--card);
             border: 1px solid var(--border);
-            padding: 12px;
-            border-radius: 8px;
-            margin-top: 16px;
+            border-radius: 16px;
+            background: #ffffff;
+            padding: 12px 14px;
           }
           .file-header {
             width: 100%;
@@ -716,15 +823,24 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
             align-items: center;
             gap: 12px;
             cursor: pointer;
-            background: transparent;
-            border: none;
-            padding: 0;
+            background: #f8f6f4;
+            border: 1px solid var(--border);
+            padding: 10px 12px;
+            border-radius: 12px;
             color: inherit;
             text-align: left;
           }
           .file-header:focus {
             outline: 2px solid var(--accent);
-            outline-offset: 4px;
+            outline-offset: 3px;
+          }
+          .file-name {
+            font-weight: 600;
+            font-size: 14px;
+          }
+          .file-meta {
+            color: var(--muted);
+            font-size: 12px;
           }
           .chevron {
             margin-left: auto;
@@ -735,79 +851,149 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
           .file-section.expanded .chevron {
             transform: rotate(180deg);
           }
-          .file-name {
-            font-weight: 600;
-          }
-          .file-meta {
-            color: var(--muted);
-            font-size: 12px;
-          }
-          .file-path {
-            margin-top: 8px;
-            color: var(--muted);
-            font-size: 12px;
-          }
           .file-content {
             display: none;
+            padding: 12px 4px 4px;
           }
           .file-section.expanded .file-content {
             display: block;
           }
           .severity-group {
-            padding-top: 4px;
+            margin-top: 8px;
+          }
+          .severity-group h3 {
+            margin: 12px 0 6px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--muted);
           }
           .finding {
-            border-top: 1px solid var(--border);
-            padding-top: 12px;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 14px;
+            background: #ffffff;
             margin-top: 12px;
           }
           .finding-header {
             display: flex;
             gap: 12px;
             align-items: center;
+            flex-wrap: wrap;
           }
           .severity {
             font-weight: 700;
-            font-size: 12px;
+            font-size: 11px;
             padding: 4px 8px;
-            border-radius: 6px;
+            border-radius: 999px;
             text-transform: uppercase;
+            letter-spacing: 0.04em;
           }
           .severity.nit { background: #e6f0ff; color: #1f4b99; }
           .severity.suggestion { background: #e8f7ef; color: #1f6b3a; }
-          .severity.warning { background: #fff4e5; color: #8a5a00; }
-          .severity.critical { background: #fde8e8; color: #9f1f1f; }
-          .title { font-weight: 600; }
-          .lines { color: var(--muted); font-size: 12px; margin-left: auto; }
-          .message { margin-top: 8px; }
-          .rationale { margin-top: 6px; color: var(--muted); }
-          .actions { margin-top: 10px; display: flex; gap: 8px; }
-          button {
+          .severity.warning { background: #fff1e6; color: #a35d1c; }
+          .severity.critical { background: #fde8e8; color: #a12a2a; }
+          .title {
+            font-weight: 600;
+            font-size: 14px;
+          }
+          .lines {
+            color: var(--muted);
+            font-size: 12px;
+            margin-left: auto;
+          }
+          .message {
+            margin-top: 10px;
+            line-height: 1.45;
+          }
+          .rationale {
+            margin-top: 8px;
+            color: var(--muted);
+          }
+          .actions {
+            margin-top: 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+          }
+          .btn {
             border: 1px solid var(--border);
-            background: #fff;
-            padding: 6px 10px;
-            border-radius: 6px;
+            background: #ffffff;
+            padding: 8px 12px;
+            border-radius: 10px;
             cursor: pointer;
+            font-size: 13px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-family: inherit;
+            color: var(--ink);
+            line-height: 1;
+          }
+          .icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            border-radius: 6px;
+            background: transparent;
+            font-weight: 700;
+            font-size: 12px;
+            color: var(--ink);
+            line-height: 1;
+            flex-shrink: 0;
+          }
+          .empty {
+            margin: 20px 0 0;
+            color: var(--muted);
+            font-size: 14px;
+          }
+          @media (max-width: 900px) {
+            body {
+              padding: 16px;
+            }
+            .hero {
+              flex-direction: column;
+              align-items: flex-start;
+            }
+            .summary-row {
+              grid-template-columns: 1fr;
+            }
           }
         </style>
       </head>
       <body>
-        <div class="toolbar">
-          <h1>SafeCommit Review</h1>
-          <select class="history" id="review-select">
-            ${historyOptions || '<option value="">No reviews yet</option>'}
-          </select>
+        <div class="page">
+          <header class="hero">
+            <div>
+              <h1>SafeCommit Review</h1>
+            </div>
+            <select class="history" id="review-select">
+              ${historyOptions || '<option value="">No reviews yet</option>'}
+            </select>
+          </header>
+          <section class="summary-row">
+            <div class="summary-card">
+              <span class="pill critical">${criticalCount} Critical</span>
+              <span class="pill warning">${warningCount} Warnings</span>
+              <span class="pill pass">${passedCount} Passed</span>
+            </div>
+            <div class="summary-card summary-meta">
+              <span>Runtime: ${duration || "—"}</span>
+              <span class="divider"></span>
+              <span>Files: ${fileCount}</span>
+              <span class="divider"></span>
+              <span class="status ${criticalCount > 0 ? "blocked" : "allowed"}">${statusText}</span>
+            </div>
+          </section>
+          <div class="content">
+            ${emptyState ? `<div class="empty">${emptyState}</div>` : ""}
+            <div class="files">
+              ${sections}
+            </div>
+          </div>
         </div>
-        <div class="summary">
-          <span class="badge">Total: ${summary.totalFindings}</span>
-          <span class="badge">Critical: ${summary.bySeverity?.critical ?? 0}</span>
-          <span class="badge">Warning: ${summary.bySeverity?.warning ?? 0}</span>
-          <span class="badge">Suggestion: ${summary.bySeverity?.suggestion ?? 0}</span>
-          <span class="badge">Nit: ${summary.bySeverity?.nit ?? 0}</span>
-          <span class="badge">Duration: ${duration}</span>
-        </div>
-        ${emptyState}
-        ${sections}
         <script>
           const vscode = acquireVsCodeApi();
           const select = document.getElementById("review-select");
@@ -980,6 +1166,13 @@ function escapeHtml(value: string): string {
 
 function escapeAttr(value: string): string {
   return escapeHtml(value).replace(/\n/g, "&#10;");
+}
+
+function normalizeCopyText(value: string): string {
+  if (!value) {
+    return value;
+  }
+  return value.replace(/'([A-Za-z0-9_.$]+\\(\\))'/g, "$1");
 }
 
 function normalizeReviewResponse(value: ReviewResponse | undefined): ReviewResponse | undefined {

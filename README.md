@@ -72,9 +72,10 @@ npm install
 2. Run `Developer: Toggle Developer Tools` to see logs if needed.
 3. Press `F5` to launch an Extension Development Host.
 4. In the Dev Host, open a git repo, stage changes, then run:
-   - Command Palette → `SafeCommit: Review Staged Changes`
+   - Command Palette → `SafeCommit: Review Staged Changes and Open Results Panel`
 
 Notes:
+
 - The review panel opens immediately with a loading state and updates when the backend responds.
 - Each review is added to a history dropdown (newest on top), and the duration is shown in seconds.
 - Findings in the panel include a **Jump to code** button.
