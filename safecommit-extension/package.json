@@ -10,7 +10,6 @@
   "categories": ["Other"],
   "activationEvents": [
     "onCommand:safecommit.reviewStaged",
-    "onCommand:safecommit.openPanel",
     "onCommand:safecommit.installHook",
     "onStartupFinished"
   ],
@@ -19,11 +18,7 @@
     "commands": [
       {
         "command": "safecommit.reviewStaged",
-        "title": "SafeCommit: Review Staged Changes"
-      },
-      {
-        "command": "safecommit.openPanel",
-        "title": "SafeCommit: Open Results Panel"
+        "title": "SafeCommit: Review Staged Changes and Open Results Panel"
       },
       {
         "command": "safecommit.installHook",

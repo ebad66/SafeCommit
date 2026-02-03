@@ -37,12 +37,30 @@ type ReviewEntry = {
   data: ReviewResponse;
 };
 
+type HookStatusPayload = {
+  status: "started" | "completed" | "error";
+  runId?: string;
+  repoRoot?: string;
+  timestamp?: string;
+  message?: string;
+  response?: ReviewResponse;
+  label?: string;
+};
+
+type HookState = {
+  runId?: string;
+  lastSignature?: string;
+};
+
 let panel: vscode.WebviewPanel | undefined;
 let diagnosticCollection: vscode.DiagnosticCollection;
 let lastReview: ReviewResponse | undefined;
 const reviewHistory: ReviewEntry[] = [];
 let activeReviewId: string | undefined;
 let activeReviewEntry: ReviewEntry | undefined;
+const hookWatchers = new Map<string, { watcher: vscode.FileSystemWatcher; repoRoot: string; statusFile: string }>();
+const hookStates = new Map<string, HookState>();
+const hookPollers = new Map<string, NodeJS.Timeout>();
 
 export function activate(context: vscode.ExtensionContext) {
   diagnosticCollection = vscode.languages.createDiagnosticCollection("safecommit");
@@ -52,13 +70,17 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("safecommit.reviewStaged", () => reviewStaged(context))
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("safecommit.openPanel", () => openPanel(context))
-  );
-  context.subscriptions.push(
     vscode.commands.registerCommand("safecommit.installHook", () => installHook(context))
   );
 
   void autoInstallHook(context);
+  void setupHookWatchers(context);
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders((event) => {
+      void setupHookWatchers(context);
+      disposeRemovedHookWatchers(event.removed);
+    })
+  );
 }
 
 export function deactivate() {
@@ -146,6 +168,196 @@ async function reviewStaged(context: vscode.ExtensionContext) {
   activeReviewId = entry.id;
   renderResults(context, entry);
   applyDiagnostics(repoRoot, response.findings);
+}
+
+async function setupHookWatchers(context: vscode.ExtensionContext) {
+  const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
+  for (const folder of workspaceFolders) {
+    const repoRoot = await findRepoRoot(folder.uri.fsPath);
+    if (!repoRoot) {
+      continue;
+    }
+    await ensureHookWatcher(context, repoRoot);
+  }
+}
+
+function disposeRemovedHookWatchers(removed: readonly vscode.WorkspaceFolder[]) {
+  if (removed.length === 0) {
+    return;
+  }
+  const removedRoots = new Set(removed.map((folder) => folder.uri.fsPath));
+  for (const [gitDir, entry] of hookWatchers.entries()) {
+    if (removedRoots.has(entry.repoRoot)) {
+      entry.watcher.dispose();
+      hookWatchers.delete(gitDir);
+      hookStates.delete(entry.repoRoot);
+      const poller = hookPollers.get(gitDir);
+      if (poller) {
+        clearInterval(poller);
+        hookPollers.delete(gitDir);
+      }
+    }
+  }
+}
+
+async function ensureHookWatcher(context: vscode.ExtensionContext, repoRoot: string) {
+  const gitDir = await findGitDir(repoRoot);
+  if (!gitDir) {
+    return;
+  }
+  if (hookWatchers.has(gitDir)) {
+    return;
+  }
+
+  const statusFile = path.join(gitDir, "safecommit", "review.json");
+  const pattern = new vscode.RelativePattern(vscode.Uri.file(gitDir), "safecommit/review.json");
+  const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+  const handler = () => {
+    void handleHookStatusFile(context, statusFile, repoRoot);
+  };
+
+  watcher.onDidCreate(handler);
+  watcher.onDidChange(handler);
+  hookWatchers.set(gitDir, { watcher, repoRoot, statusFile });
+  context.subscriptions.push(watcher);
+
+  seedHookState(statusFile, repoRoot).catch(() => undefined);
+  ensureHookPoller(context, gitDir, statusFile, repoRoot);
+}
+
+function ensureHookPoller(
+  context: vscode.ExtensionContext,
+  gitDir: string,
+  statusFile: string,
+  repoRoot: string
+) {
+  if (hookPollers.has(gitDir)) {
+    return;
+  }
+  const interval = setInterval(() => {
+    void handleHookStatusFile(context, statusFile, repoRoot);
+  }, 750);
+  hookPollers.set(gitDir, interval);
+  context.subscriptions.push({ dispose: () => clearInterval(interval) });
+}
+
+async function seedHookState(statusFile: string, repoRoot: string) {
+  let content = "";
+  try {
+    content = await fs.promises.readFile(statusFile, "utf8");
+  } catch {
+    return;
+  }
+  let payload: HookStatusPayload;
+  try {
+    payload = JSON.parse(content) as HookStatusPayload;
+  } catch {
+    return;
+  }
+  if (!payload || typeof payload !== "object") {
+    return;
+  }
+  const runId = payload.runId || "";
+  const signature = `${runId}|${payload.status}|${payload.timestamp || ""}|${payload.message || ""}`;
+  hookStates.set(repoRoot, { runId, lastSignature: signature });
+}
+
+async function handleHookStatusFile(context: vscode.ExtensionContext, statusFile: string, fallbackRepoRoot: string) {
+  let content = "";
+  try {
+    content = await fs.promises.readFile(statusFile, "utf8");
+  } catch {
+    return;
+  }
+
+  let payload: HookStatusPayload;
+  try {
+    payload = JSON.parse(content) as HookStatusPayload;
+  } catch {
+    return;
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return;
+  }
+
+  if (payload.status !== "started" && payload.status !== "completed" && payload.status !== "error") {
+    return;
+  }
+
+  const repoRoot = payload.repoRoot || fallbackRepoRoot;
+  if (!repoRoot) {
+    return;
+  }
+
+  const runId = payload.runId || "";
+  const signature = `${runId}|${payload.status}|${payload.timestamp || ""}|${payload.message || ""}`;
+  const state = hookStates.get(repoRoot);
+  if (!state && isStaleStatus(payload.timestamp)) {
+    hookStates.set(repoRoot, { runId, lastSignature: signature });
+    return;
+  }
+  if (state?.lastSignature === signature) {
+    return;
+  }
+
+  if ((payload.status === "completed" || payload.status === "error") && state?.runId && runId && state.runId !== runId) {
+    return;
+  }
+
+  if (payload.status === "started") {
+    hookStates.set(repoRoot, { runId, lastSignature: signature });
+    openPanel(context);
+    if (panel) {
+      panel.webview.html = renderLoadingHtml();
+    }
+    return;
+  }
+
+  if (payload.status === "error") {
+    hookStates.set(repoRoot, { runId: runId || state?.runId, lastSignature: signature });
+    openPanel(context);
+    if (panel) {
+      panel.webview.html = renderErrorHtml(payload.message || "SafeCommit: pre-commit hook failed.");
+      panel.reveal();
+    }
+    return;
+  }
+
+  const response = normalizeReviewResponse(payload.response);
+  if (!response) {
+    openPanel(context);
+    if (panel) {
+      panel.webview.html = renderErrorHtml("SafeCommit: pre-commit hook completed without results.");
+      panel.reveal();
+    }
+    return;
+  }
+
+  const entry: ReviewEntry = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    label: payload.label || "Pre-commit",
+    time: new Date(payload.timestamp ?? Date.now()).toLocaleString(),
+    repoRoot,
+    data: response
+  };
+  reviewHistory.unshift(entry);
+  activeReviewId = entry.id;
+  renderResults(context, entry);
+  panel?.reveal();
+  applyDiagnostics(repoRoot, response.findings);
+  hookStates.set(repoRoot, { runId: runId || state?.runId, lastSignature: signature });
+}
+
+function isStaleStatus(timestamp?: string) {
+  if (!timestamp) {
+    return false;
+  }
+  const parsed = Date.parse(timestamp);
+  if (Number.isNaN(parsed)) {
+    return false;
+  }
+  return Date.now() - parsed > 2 * 60 * 1000;
 }
 
 function openPanel(context: vscode.ExtensionContext) {
@@ -351,7 +563,10 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
   };
 
   const sections = Object.entries(grouped)
-    .map(([file, items]) => {
+    .map(([file, items], index) => {
+      const fileName = file.split(/[\\/]/).pop() || file;
+      const issueCount = items.length;
+      const issueLabel = `${issueCount} issue${issueCount === 1 ? "" : "s"}`;
       const bySeverity = groupBySeverity(items);
       const severitySections = severityOrder
         .map((severity) => {
@@ -398,9 +613,15 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
         .join("\n");
 
       return `
-        <section class="file-section">
-          <h2>${escapeHtml(file)}</h2>
-          ${severitySections}
+        <section class="file-section" data-file-section="${index}">
+          <button class="file-header" type="button" data-toggle="${index}" aria-expanded="false">
+            <span class="file-name">${escapeHtml(fileName)}</span>
+            <span class="file-meta">${issueLabel}</span>
+            <span class="chevron" aria-hidden="true">▼</span>
+          </button>
+          <div class="file-content" data-content="${index}">
+            ${severitySections}
+          </div>
         </section>
       `;
     })
@@ -489,6 +710,49 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
             border-radius: 8px;
             margin-top: 16px;
           }
+          .file-header {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            background: transparent;
+            border: none;
+            padding: 0;
+            color: inherit;
+            text-align: left;
+          }
+          .file-header:focus {
+            outline: 2px solid var(--accent);
+            outline-offset: 4px;
+          }
+          .chevron {
+            margin-left: auto;
+            font-size: 12px;
+            color: var(--muted);
+            transition: transform 0.15s ease;
+          }
+          .file-section.expanded .chevron {
+            transform: rotate(180deg);
+          }
+          .file-name {
+            font-weight: 600;
+          }
+          .file-meta {
+            color: var(--muted);
+            font-size: 12px;
+          }
+          .file-path {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 12px;
+          }
+          .file-content {
+            display: none;
+          }
+          .file-section.expanded .file-content {
+            display: block;
+          }
           .severity-group {
             padding-top: 4px;
           }
@@ -556,6 +820,20 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
               }
             });
           }
+          document.querySelectorAll("[data-toggle]").forEach((button) => {
+            button.addEventListener("click", () => {
+              const id = button.getAttribute("data-toggle");
+              if (!id) {
+                return;
+              }
+              const section = document.querySelector(\`[data-file-section="\${id}"]\`);
+              if (!section) {
+                return;
+              }
+              const expanded = section.classList.toggle("expanded");
+              button.setAttribute("aria-expanded", expanded ? "true" : "false");
+            });
+          });
           document.querySelectorAll("button[data-copy]").forEach((button) => {
             button.addEventListener("click", async () => {
               const text = button.getAttribute("data-copy") || "";
@@ -625,6 +903,56 @@ function renderLoadingHtml(): string {
   `;
 }
 
+function renderErrorHtml(message: string): string {
+  const safeMessage = escapeHtml(message || "SafeCommit: pre-commit hook failed.");
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SafeCommit Review</title>
+        <style>
+          :root {
+            --bg: #f4f1ec;
+            --card: #ffffff;
+            --ink: #1f2a2e;
+            --muted: #6a6f73;
+            --border: #e2e0db;
+            --error: #9f1f1f;
+          }
+          body {
+            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+            background: var(--bg);
+            color: var(--ink);
+            margin: 0;
+            padding: 24px;
+          }
+          .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            padding: 16px;
+            border-radius: 8px;
+          }
+          .title {
+            font-weight: 700;
+          }
+          .message {
+            color: var(--error);
+            margin-top: 6px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="title">SafeCommit Review</div>
+          <div class="message">${safeMessage}</div>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
 function groupFindings(findings: Finding[]): Record<string, Finding[]> {
   return findings.reduce<Record<string, Finding[]>>((acc, finding) => {
     acc[finding.file] = acc[finding.file] || [];
@@ -652,6 +980,24 @@ function escapeHtml(value: string): string {
 
 function escapeAttr(value: string): string {
   return escapeHtml(value).replace(/\n/g, "&#10;");
+}
+
+function normalizeReviewResponse(value: ReviewResponse | undefined): ReviewResponse | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const findings = Array.isArray(value.findings) ? value.findings : [];
+  const summary = value.summary || { totalFindings: findings.length, bySeverity: {}, durationMs: 0 };
+  const normalizedSummary: Summary = {
+    totalFindings: typeof summary.totalFindings === "number" ? summary.totalFindings : findings.length,
+    bySeverity: summary.bySeverity && typeof summary.bySeverity === "object" ? summary.bySeverity : {},
+    durationMs: typeof summary.durationMs === "number" ? summary.durationMs : 0
+  };
+  return {
+    requestId: value.requestId || "",
+    findings,
+    summary: normalizedSummary
+  };
 }
 
 function clearDiagnostics() {
@@ -716,6 +1062,19 @@ async function findRepoRoot(startPath: string): Promise<string | undefined> {
       return undefined;
     }
     current = parent;
+  }
+}
+
+async function findGitDir(repoRoot: string): Promise<string | undefined> {
+  try {
+    const output = await runGit(repoRoot, ["rev-parse", "--git-dir"]);
+    const gitDir = output.trim();
+    if (!gitDir) {
+      return undefined;
+    }
+    return path.isAbsolute(gitDir) ? gitDir : path.join(repoRoot, gitDir);
+  } catch {
+    return undefined;
   }
 }
 

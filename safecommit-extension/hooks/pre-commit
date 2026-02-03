@@ -16,13 +16,42 @@ if [ -z "$repo_root" ]; then
   exit 0
 fi
 
+git_dir=$(git rev-parse --git-dir 2>/dev/null || true)
+if [ -n "$git_dir" ] && [ "${git_dir#/}" = "$git_dir" ]; then
+  git_dir="$repo_root/$git_dir"
+fi
+status_dir=""
+status_file=""
+if [ -n "$git_dir" ]; then
+  status_dir="$git_dir/safecommit"
+  status_file="$status_dir/review.json"
+fi
+
+write_status() {
+  local status="$1"
+  local response="${2-}"
+  local message="${3-}"
+  if [ -z "${status_file:-}" ]; then
+    return
+  fi
+  set +e
+  SAFECOMMIT_STATUS_FILE="$status_file" \
+  SAFECOMMIT_STATUS="$status" \
+  SAFECOMMIT_RUN_ID="$run_id" \
+  SAFECOMMIT_REPO_ROOT="$repo_root" \
+  SAFECOMMIT_MESSAGE="$message" \
+  SAFECOMMIT_RESPONSE="$response" \
+  node -e "const fs=require('fs');const path=require('path');const file=process.env.SAFECOMMIT_STATUS_FILE;if(!file)process.exit(0);const status=process.env.SAFECOMMIT_STATUS;const runId=process.env.SAFECOMMIT_RUN_ID;const repoRoot=process.env.SAFECOMMIT_REPO_ROOT;const message=process.env.SAFECOMMIT_MESSAGE;let response;try{response=process.env.SAFECOMMIT_RESPONSE?JSON.parse(process.env.SAFECOMMIT_RESPONSE):undefined;}catch{}const data={status,runId,repoRoot,timestamp:new Date().toISOString()};if(message){data.message=message;}if(response){data.response=response;}fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,JSON.stringify(data));" >/dev/null 2>&1
+  set -e
+}
+
 cat <<'EOF'
-███████╗ █████╗ ███████╗███████╗ ██████╗ ██████╗ ███╗   ███╗███╗   ███╗██╗████████╗    ██████╗ ███████╗██████╗  ██████╗ ██████╗ ████████╗
-██╔════╝██╔══██╗██╔════╝██╔════╝██╔════╝██╔═══██╗████╗ ████║████╗ ████║██║╚══██╔══╝    ██╔══██╗██╔════╝██╔══██╗██╔═══██╗██╔══██╗╚══██╔══╝
-███████╗███████║█████╗  █████╗  ██║     ██║   ██║██╔████╔██║██╔████╔██║██║   ██║       ██████╔╝█████╗  ██████╔╝██║   ██║██████╔╝   ██║   
-╚════██║██╔══██║██╔══╝  ██╔══╝  ██║     ██║   ██║██║╚██╔╝██║██║╚██╔╝██║██║   ██║       ██╔══██╗██╔══╝  ██╔═══╝ ██║   ██║██╔══██╗   ██║   
-███████║██║  ██║██║     ███████╗╚██████╗╚██████╔╝██║ ╚═╝ ██║██║ ╚═╝ ██║██║   ██║       ██║  ██║███████╗██║     ╚██████╔╝██║  ██║   ██║   
-╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝ ╚═════╝ ╚═════╝ ╚═╝     ╚═╝╚═╝     ╚═╝╚═╝   ╚═╝       ╚═╝  ╚═╝╚══════╝╚═╝      ╚═════╝ ╚═╝  ╚═╝   ╚═╝   
+███████╗ █████╗ ███████╗███████╗ ██████╗ ██████╗ ███╗   ███╗███╗   ███╗██╗████████╗
+██╔════╝██╔══██╗██╔════╝██╔════╝██╔════╝██╔═══██╗████╗ ████║████╗ ████║██║╚══██╔══╝
+███████╗███████║█████╗  █████╗  ██║     ██║   ██║██╔████╔██║██╔████╔██║██║   ██║   
+╚════██║██╔══██║██╔══╝  ██╔══╝  ██║     ██║   ██║██║╚██╔╝██║██║╚██╔╝██║██║   ██║   
+███████║██║  ██║██║     ███████╗╚██████╗╚██████╔╝██║ ╚═╝ ██║██║ ╚═╝ ██║██║   ██║   
+╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝ ╚═════╝ ╚═════╝ ╚═╝     ╚═╝╚═╝     ╚═╝╚═╝   ╚═╝   
 EOF
 
 printf "SafeCommit: review staged changes before commit? (Y/n) "
@@ -32,9 +61,14 @@ if [ "$reply" != "Y" ] && [ "$reply" != "y" ]; then
   exit 0
 fi
 
+run_id="$(date +%s)-$$"
+write_status "started"
+
 diff=$(git diff --cached --unified=3 || true)
 if [ -z "$diff" ]; then
   echo "SafeCommit: no staged changes to review."
+  empty_response='{"requestId":"local-no-diff","findings":[],"summary":{"totalFindings":0,"bySeverity":{},"durationMs":0}}'
+  write_status "completed" "$empty_response"
   exit 0
 fi
 
@@ -44,6 +78,7 @@ payload=$(SAFECOMMIT_FILES="$files" SAFECOMMIT_MAX_DIFF_BYTES="$MAX_DIFF_BYTES" 
 
 if [ -z "$payload" ]; then
   echo "SafeCommit: failed to build request payload."
+  write_status "error" "" "SafeCommit: failed to build request payload."
   exit 0
 fi
 
@@ -55,7 +90,9 @@ fi
 response=$(curl -sS -X POST "$API_BASE_URL/v1/review/diff" "${headers[@]}" --data "$payload" || true)
 if [ -z "$response" ]; then
   echo "SafeCommit: backend unavailable, skipping review."
+  write_status "error" "" "SafeCommit: backend unavailable, skipping review."
   exit 0
 fi
 
+write_status "completed" "$response"
 node -e "const input=process.argv[1]; const fail=process.env.SAFECOMMIT_FAIL_ON_SEVERITY||'critical'; const order={nit:0,suggestion:1,warning:2,critical:3}; let data; try{data=JSON.parse(input);}catch(e){console.log('SafeCommit: invalid response from backend.');process.exit(0);} const findings=Array.isArray(data.findings)?data.findings:[]; console.log('Found Issues:'); if(findings.length===0){ console.log('1. None'); } else { const seen=new Set(); let count=0; for(const f of findings){ const severity=f.severity||'unspecified'; const file=f.file||'unknown'; const lineStart=(f.lineStart!=null?f.lineStart:'?'); const lineEnd=(f.lineEnd!=null?f.lineEnd:'?'); const title=f.title||'Untitled issue'; const key=severity+'|'+file+'|'+lineStart+'|'+lineEnd+'|'+title; if(seen.has(key)){ continue; } seen.add(key); count+=1; const location=(lineStart===lineEnd)?(file+':'+lineStart):(file+':'+lineStart+'-'+lineEnd); console.log(count+'. ['+severity+'] '+location+' - '+title); } } const shouldFail=findings.some(f=>order[f.severity]>=order[fail]); if(shouldFail){console.log('SafeCommit: blocking commit due to severity >=', fail); process.exit(1);} process.exit(0);" "$response"
