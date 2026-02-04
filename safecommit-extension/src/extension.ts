@@ -666,24 +666,24 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
         <title>SafeCommit Review</title>
         <style>
           :root {
-            --bg: #f6f4f2;
-            --card: #ffffff;
-            --surface: #fbfaf9;
-            --ink: #1d232a;
-            --muted: #6f757b;
-            --accent: #2f6fed;
-            --border: #e6e1dc;
-            --critical: #c63b4a;
-            --warning: #e0843c;
-            --pass: #2e9c5c;
-            --shadow: 0 18px 50px rgba(28, 25, 23, 0.12);
+            --bg: #1e1e1e;
+            --card: #252526;
+            --surface: #1f1f1f;
+            --ink: #d4d4d4;
+            --muted: #9da0a5;
+            --accent: #0e639c;
+            --border: #3c3c3c;
+            --critical: #f14c4c;
+            --warning: #cca700;
+            --pass: #4ec9b0;
+            --shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
           }
           * {
             box-sizing: border-box;
           }
           body {
             font-family: "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI", sans-serif;
-            background: radial-gradient(circle at top, #ffffff 0%, #f2ede9 45%, #f6f4f2 100%);
+            background: var(--bg);
             color: var(--ink);
             margin: 0;
             padding: 32px;
@@ -695,6 +695,7 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
             border-radius: 24px;
             box-shadow: var(--shadow);
             overflow: hidden;
+            border: 1px solid var(--border);
           }
           .hero {
             display: flex;
@@ -702,7 +703,7 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
             justify-content: space-between;
             gap: 24px;
             padding: 28px 32px;
-            background: linear-gradient(120deg, #ffffff 0%, #f7f2ee 100%);
+            background: var(--surface);
             border-bottom: 1px solid var(--border);
           }
           .hero h1 {
@@ -716,7 +717,7 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
             font-size: 14px;
           }
           .history {
-            background: #ffffff;
+            background: var(--surface);
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 10px 14px;
@@ -734,7 +735,7 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
             border-bottom: 1px solid var(--border);
           }
           .summary-card {
-            background: #ffffff;
+            background: var(--card);
             border: 1px solid var(--border);
             border-radius: 16px;
             padding: 14px 16px;
@@ -752,7 +753,7 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
             border-radius: 999px;
             font-size: 13px;
             font-weight: 600;
-            background: #f5f2ef;
+            background: #333333;
             color: var(--ink);
           }
           .pill::before {
@@ -792,19 +793,19 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
             font-size: 13px;
             font-weight: 600;
             color: var(--ink);
-            background: #f5f2ef;
+            background: #333333;
           }
           .status.blocked {
-            background: #fdecec;
+            background: #3a1d1d;
             color: var(--critical);
           }
           .status.allowed {
-            background: #e8f6ee;
+            background: #1f3329;
             color: var(--pass);
           }
           .content {
             padding: 22px 32px 32px;
-            background: #ffffff;
+            background: var(--bg);
           }
           .files {
             display: flex;
@@ -814,7 +815,7 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
           .file-section {
             border: 1px solid var(--border);
             border-radius: 16px;
-            background: #ffffff;
+            background: var(--card);
             padding: 12px 14px;
           }
           .file-header {
@@ -823,7 +824,7 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
             align-items: center;
             gap: 12px;
             cursor: pointer;
-            background: #f8f6f4;
+            background: var(--surface);
             border: 1px solid var(--border);
             padding: 10px 12px;
             border-radius: 12px;
@@ -872,7 +873,7 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
             border: 1px solid var(--border);
             border-radius: 14px;
             padding: 14px;
-            background: #ffffff;
+            background: var(--card);
             margin-top: 12px;
           }
           .finding-header {
@@ -889,10 +890,10 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
             text-transform: uppercase;
             letter-spacing: 0.04em;
           }
-          .severity.nit { background: #e6f0ff; color: #1f4b99; }
-          .severity.suggestion { background: #e8f7ef; color: #1f6b3a; }
-          .severity.warning { background: #fff1e6; color: #a35d1c; }
-          .severity.critical { background: #fde8e8; color: #a12a2a; }
+          .severity.nit { background: #24364a; color: #9cdcfe; }
+          .severity.suggestion { background: #1f3329; color: #4ec9b0; }
+          .severity.warning { background: #3a2f14; color: #cca700; }
+          .severity.critical { background: #3a1d1d; color: #f14c4c; }
           .title {
             font-weight: 600;
             font-size: 14px;
@@ -918,7 +919,7 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
           }
           .btn {
             border: 1px solid var(--border);
-            background: #ffffff;
+            background: var(--surface);
             padding: 8px 12px;
             border-radius: 10px;
             cursor: pointer;
@@ -930,6 +931,9 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
             color: var(--ink);
             line-height: 1;
           }
+          .btn:hover {
+            background: #333333;
+          }
           .icon {
             display: inline-flex;
             align-items: center;
@@ -937,7 +941,7 @@ function renderHtml(options: { entry?: ReviewEntry; history: ReviewEntry[]; acti
             width: 20px;
             height: 20px;
             border-radius: 6px;
-            background: transparent;
+            background: #333333;
             font-weight: 700;
             font-size: 12px;
             color: var(--ink);
@@ -1055,11 +1059,11 @@ function renderLoadingHtml(): string {
         <title>SafeCommit Review</title>
         <style>
           :root {
-            --bg: #f4f1ec;
-            --card: #ffffff;
-            --ink: #1f2a2e;
-            --muted: #6a6f73;
-            --border: #e2e0db;
+            --bg: #1e1e1e;
+            --card: #252526;
+            --ink: #d4d4d4;
+            --muted: #9da0a5;
+            --border: #3c3c3c;
           }
           body {
             font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -1100,12 +1104,12 @@ function renderErrorHtml(message: string): string {
         <title>SafeCommit Review</title>
         <style>
           :root {
-            --bg: #f4f1ec;
-            --card: #ffffff;
-            --ink: #1f2a2e;
-            --muted: #6a6f73;
-            --border: #e2e0db;
-            --error: #9f1f1f;
+            --bg: #1e1e1e;
+            --card: #252526;
+            --ink: #d4d4d4;
+            --muted: #9da0a5;
+            --border: #3c3c3c;
+            --error: #f14c4c;
           }
           body {
             font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
