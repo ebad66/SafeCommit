@@ -10,35 +10,40 @@ export function buildSystemPrompt(): string {
     "Map each finding to an existing file path and line range in the file.",
     "Prefer actionable guidance and minimal patches.",
     "Make the message and rationale detailed and specific, including impact and concrete fix guidance.",
-    "Be conservative; avoid nitpicks unless clearly beneficial."
+    "Be conservative; avoid nitpicks unless clearly beneficial.",
+    "Summary counts must exactly match the findings array.",
   ].join(" ");
 }
 
 export function buildUserPrompt(diff: string, files: string[]): string {
-  const schemaHint = JSON.stringify({
-    findings: [
-      {
-        file: "string",
-        lineStart: 1,
-        lineEnd: 1,
-        severity: "warning",
-        title: "string",
-        message: "string",
-        rationale: "string",
-        patch: "string"
-      }
-    ],
-    summary: {
-      totalFindings: 1,
-      bySeverity: {
-        nit: 0,
-        suggestion: 0,
-        warning: 1,
-        critical: 0
+  const schemaHint = JSON.stringify(
+    {
+      findings: [
+        {
+          file: "string",
+          lineStart: 1,
+          lineEnd: 1,
+          severity: "warning",
+          title: "string",
+          message: "string",
+          rationale: "string",
+          patch: "string",
+        },
+      ],
+      summary: {
+        totalFindings: 1,
+        bySeverity: {
+          nit: 0,
+          suggestion: 0,
+          warning: 1,
+          critical: 0,
+        },
+        durationMs: 1,
       },
-      durationMs: 1
-    }
-  }, null, 2);
+    },
+    null,
+    2,
+  );
 
   return [
     "You must review ONLY the staged diff below.",
@@ -47,7 +52,7 @@ export function buildUserPrompt(diff: string, files: string[]): string {
     "Staged diff:",
     diff,
     "Return ONLY valid JSON matching this schema:",
-    schemaHint
+    schemaHint,
   ].join("\n\n");
 }
 
@@ -56,7 +61,7 @@ export function buildRepairPrompt(badOutput: string): string {
     "The previous response was invalid.",
     "Return ONLY valid JSON matching the required schema. No markdown, no commentary.",
     "Here is the invalid output:",
-    badOutput
+    badOutput,
   ].join("\n\n");
 }
 

@@ -1,21 +1,38 @@
-﻿# SafeCommit
+# Safecommit (Local code reviewer)
 
-SafeCommit is an MVP that reviews staged git changes with Gemini before commit. It ships as a VS Code extension and a Node.js backend.
+Safecommit is a local-first workflow that reviews **staged** Git changes before you commit. It ships as:
 
-## Folder structure
+- A VS Code extension that shows a review panel and diagnostics
+- A Node.js backend that talks to Gemini
+- Optional pre-commit hooks (bash + node) for terminal workflows
 
-- `safecommit-extension/`
-- `safecommit-backend/`
+## Screenshots
 
-## Backend
+Add your screenshots here:
 
-### Requirements
+- `docs/panel.png`
+- `docs/terminal.png`
 
-- Node.js 18+
-- `GEMINI_API_KEY` in the environment
-  - Optional: `DEFAULT_MAX_DIFF_BYTES`, `LLM_TIMEOUT_MS`, `DEBUG_PROMPTS`
+Example embeds (leave as-is and replace the files):
 
-### Setup
+![Safecommit panel](docs/panel.png)
+![Safecommit terminal](docs/terminal.png)
+
+## Features
+
+- Review staged diffs with Gemini before committing
+- Inline diagnostics and a rich results panel
+- History of recent reviews
+- Optional pre-commit hook that can block commits by severity
+
+## Folder Structure
+
+- `safecommit-backend/` Node.js API that calls Gemini
+- `safecommit-extension/` VS Code extension + hook scripts
+
+## Quickstart
+
+### 1) Backend (local API)
 
 ```bash
 cd safecommit-backend
@@ -23,25 +40,64 @@ npm install
 cp .env.example .env
 ```
 
-Edit `.env` with your Gemini API key.
-
-### Run
+Set your Gemini key in `safecommit-backend/.env`, then:
 
 ```bash
 npm run dev
 ```
 
-The backend listens on `http://localhost:8787` by default.
+Default API base URL: `http://localhost:8787`
 
-### Debugging prompts (optional)
+### 2) VS Code extension (dev host)
 
-Set `DEBUG_PROMPTS=1` in `.env` to log the exact system + user prompts sent to Gemini.
+```bash
+cd safecommit-extension
+npm install
+```
 
-### Endpoint
+Then in VS Code:
+
+1. Open the repo folder.
+2. Press `F5` to launch an Extension Development Host.
+3. In the Dev Host, open a Git repo, stage changes, then run:
+   - Command Palette → `SafeCommit: Review Staged Changes and Open Results Panel`
+
+## Pre-commit Hook (optional)
+
+Install from VS Code:
+
+- Command Palette → `SafeCommit: Install Pre-Commit Hook`
+
+Manual install:
+
+```bash
+cp safecommit-extension/hooks/pre-commit .git/hooks/pre-commit
+cp safecommit-extension/hooks/pre-commit.js .git/hooks/pre-commit.js
+chmod +x .git/hooks/pre-commit .git/hooks/pre-commit.js
+```
+
+The hook is bypassable with `git commit --no-verify`.
+
+## Configuration
+
+### VS Code settings
+
+- `safecommit.apiBaseUrl` (default `http://localhost:8787`)
+- `safecommit.apiKey` (optional)
+- `safecommit.failOnSeverity` (default `critical`)
+- `safecommit.maxDiffBytes` (default `200000`)
+- `safecommit.autoInstallHook` (default `true`)
+
+### Hook environment variables
+
+- `SAFECOMMIT_API_BASE_URL` (default `http://localhost:8787`)
+- `SAFECOMMIT_API_KEY` (optional)
+- `SAFECOMMIT_FAIL_ON_SEVERITY` (default `critical`)
+- `SAFECOMMIT_MAX_DIFF_BYTES` (default `200000`)
+
+## API
 
 `POST /v1/review/diff`
-
-Body:
 
 ```json
 { "repoId": "string", "diff": "string", "files": ["string"] }
@@ -57,74 +113,17 @@ Response:
 }
 ```
 
-## VS Code Extension
+## Security & Privacy Notes
 
-### Setup
+- The backend sends diffs to Gemini. Don’t use this on sensitive/private code unless you’re comfortable with that.
+- The extension and hook do not store diffs on disk; they send the staged diff to the backend in memory.
+- Keep your API keys out of git. This repo ships only `.env.example`.
 
-```bash
-cd safecommit-extension
-npm install
-```
+## Development Notes
 
-### Run in Extension Development Host
+- The backend reads staged diffs with `git diff --cached --unified=3`.
+- If the backend is unreachable, the extension shows an error and the hook allows the commit.
 
-1. Open the repo in VS Code.
-2. Run `Developer: Toggle Developer Tools` to see logs if needed.
-3. Press `F5` to launch an Extension Development Host.
-4. In the Dev Host, open a git repo, stage changes, then run:
-   - Command Palette → `SafeCommit: Review Staged Changes and Open Results Panel`
+## License
 
-Notes:
-
-- The review panel opens immediately with a loading state and updates when the backend responds.
-- Each review is added to a history dropdown (newest on top), and the duration is shown in seconds.
-- Findings in the panel include a **Jump to code** button.
-
-### Settings
-
-- `safecommit.apiBaseUrl` (default `http://localhost:8787`)
-- `safecommit.apiKey` (optional)
-- `safecommit.failOnSeverity` (default `critical`)
-- `safecommit.maxDiffBytes` (default `200000`)
-- `safecommit.autoInstallHook` (default `true`)
-
-## Pre-commit Hooks
-
-Two hooks are provided:
-
-- Bash: `safecommit-extension/hooks/pre-commit`
-- Node: `safecommit-extension/hooks/pre-commit.js`
-
-### Install via VS Code
-
-Run `SafeCommit: Install Pre-Commit Hook` from the Command Palette. This copies both hook files into `.git/hooks/`.
-
-Note: if you update hook scripts, re-run the install command (hooks are per-repo and don’t auto-overwrite).
-
-### Manual install
-
-```bash
-cp safecommit-extension/hooks/pre-commit .git/hooks/pre-commit
-cp safecommit-extension/hooks/pre-commit.js .git/hooks/pre-commit.js
-chmod +x .git/hooks/pre-commit .git/hooks/pre-commit.js
-```
-
-### Hook configuration (environment variables)
-
-- `SAFECOMMIT_API_BASE_URL` (default `http://localhost:8787`)
-- `SAFECOMMIT_API_KEY` (optional)
-- `SAFECOMMIT_FAIL_ON_SEVERITY` (default `critical`)
-- `SAFECOMMIT_MAX_DIFF_BYTES` (default `200000`)
-
-The hook is bypassable with `git commit --no-verify`.
-
-## Testing on a sample repo
-
-1. Start the backend.
-2. Open a git repo and stage some changes.
-3. Use the VS Code command or run a commit to trigger the hook.
-
-## Notes
-
-- The backend only analyzes staged diffs (`git diff --cached --unified=3`).
-- If the backend is unreachable, the extension shows a friendly error and the hook allows the commit.
+MIT (see `LICENSE`).
