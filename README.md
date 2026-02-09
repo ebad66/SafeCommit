@@ -8,13 +8,6 @@ Safecommit is a tool that reviews **staged** Git changes before you commit. It s
 
 ## Screenshots
 
-Add your screenshots here:
-
-- `docs/panel.png`
-- `docs/terminal.png`
-
-Example embeds (leave as-is and replace the files):
-
 ![Safecommit panel](docs/panel.png)
 ![Safecommit terminal](docs/terminal.png)
 
