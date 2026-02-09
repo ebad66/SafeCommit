@@ -6,6 +6,7 @@ import {
   buildUserPrompt,
 } from "../prompt";
 import { reviewResponseSchema } from "../schema";
+import type { Finding } from "../schema";
 import { safeParseJson } from "../utils/parseJson";
 import { withTimeout } from "../utils/timeout";
 import { config } from "../config";
@@ -64,7 +65,7 @@ export class GeminiProvider implements LLMProvider {
 
   private tryParse(
     text: string,
-  ): { ok: true; data: { findings: unknown } } | { ok: false; error: Error } {
+  ): { ok: true; data: { findings: Finding[] } } | { ok: false; error: Error } {
     try {
       const json = safeParseJson(text);
       const parsed = reviewResponseSchema.safeParse(json);

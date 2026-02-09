@@ -1,6 +1,6 @@
 # Safecommit (Local code reviewer)
 
-Safecommit is a local-first workflow that reviews **staged** Git changes before you commit. It ships as:
+Safecommit is a tool that reviews **staged** Git changes before you commit. It ships as:
 
 - A VS Code extension that shows a review panel and diagnostics
 - A Node.js backend that talks to Gemini
