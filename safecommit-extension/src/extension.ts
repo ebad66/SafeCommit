@@ -1215,6 +1215,7 @@ function applyDiagnostics(repoRoot: string, findings: Finding[]) {
       new vscode.Position(endLine, Number.MAX_SAFE_INTEGER)
     );
     const diagnostic = new vscode.Diagnostic(range, `${finding.title}: ${finding.message}`, mapSeverity(finding.severity));
+    diagnostic.source = "SafeCommit";
     const list = diagnosticsByFile.get(filePath) || [];
     list.push(diagnostic);
     diagnosticsByFile.set(filePath, list);
